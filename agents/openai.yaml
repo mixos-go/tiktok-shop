@@ -1,0 +1,4 @@
+interface:
+  display_name: "TikTok Shop OpenAPI Guide"
+  short_description: "Answer TikTok Shop OpenAPI structure questions from bundled references first, preferring the newest API version."
+  default_prompt: "Use $tiktok-shop-api-guide to confirm this TikTok Shop OpenAPI structure from references/api/ first."
