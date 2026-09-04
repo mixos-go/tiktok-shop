@@ -78,22 +78,25 @@ Kelas `TikTokConnector` **multi-seller** (satu instance, banyak shop):
 
 ## Fase 1 — Connector core (struktur + contract)
 
-- [ ] `connector/types.ts` — `TokenSet`, `ConnectorConfig` sesuai kontrak; tambah field spesifik
-      TikTok (`shopCipher` di `TokenSet`).
-- [ ] `connector/token-store.ts` — `interface TokenStore` + `InMemoryTokenStore`.
-- [ ] Tambah `refreshAccessToken(credentials, { refreshToken, shopId?, shopCipher? })` di
-      `src/auth.ts` — panggil endpoint `/authorization/202309/token` dgn `grant_type=refresh_token`
-      + `refresh_token`; kembalikan tipe token yang ter-struktur (bukan `any`).
-- [ ] `connector/connector.ts` — class `TikTokConnector` (multi-seller):
-  - `buildAuthUrl(shopId, state?)` → pakai `buildAuthUrl()` yang ada di `src/auth.ts`.
-  - `handleCallback(shopId, code)` → panggil `exchangeAuthCode()` yang ada di `src/auth.ts`,
-    parse response jadi `TokenSet` (access_token, refresh_token, expiresAt dari `expires_in`),
-    simpan ke store.
-  - `refresh(shopId)` → panggil `refreshAccessToken()` baru; update store.
-  - `getClient(shopId)` → return `TikTokClient` yang auto-inject token & auto-refresh (Fase 3).
-  - `listShopIds()`.
-- [ ] `connector/index.ts` — `createTikTokConnector(config)`.
-- [ ] Ekspor connector dari `src/index.ts`.
+- [x] `connector/types.ts` — `TokenSet`, `TikTokShopConnectorConfig` sesuai kontrak; field spesifik
+      TikTok (`openId`, `shopCipher`, `sellerName` di `TokenSet`; `baseUrl`, `serviceIds`,
+      `shopType`, `refreshThresholdMs` di config).
+- [x] `connector/token-store.ts` — `interface TokenStore` + `InMemoryTokenStore` (dengan `keys()`).
+- [x] `connector/connector.ts` — class `TikTokShopConnector` (multi-seller):
+  - `buildAuthUrl(shopId, state?)` → pakai `buildAuthUrl()` yang ada di `src/auth.ts`; `shopId`
+    disisipkan ke query redirect.
+  - `handleCallback(shopId, code)` → panggil `exchangeAuthCode()` yang ada di `src/auth.ts`, parse
+    response jadi `TokenSet` (akses di `data`, expiresAt dari `access_token_expire_in`), simpan.
+  - `refresh(shopId)` → inline POST `/authorization/202309/token/refresh` (grant_type=refresh_token)
+    karena primitif refresh belum ada; update store. (→ diformalkan di Fase 2.)
+  - `getClient(shopId)` (async) → return `TikTokClient` ter-inject accessToken (`x-tts-access-token`)
+    + shopCipher; auto-refresh saat `expiresAt` mendekat di Fase 2.
+  - `listShopIds()` — union dari `keys()` store + Set internal connector.
+- [x] `connector/index.ts` — `createTikTokShopConnector(config)`.
+- [x] Ekspor connector dari `src/index.ts` (`export * from './connector'`).
+
+> Pilihan nama: `TikTokShopConnector` (bukan `TikTokConnector`) — menyesuaikan nama package
+> `@mixos-go/tiktok-shop-sdk`.
 
 ## Fase 2 — Fix OAuth primitif + token injection runtime
 

@@ -5,6 +5,7 @@ import * as generated from './generated'
 export * from './types'
 export * from './client'
 export * from './auth'
+export * from './connector'
 export { TikTokClient } from './client'
 export { generated }
 
