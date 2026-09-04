@@ -1,6 +1,6 @@
 {
   "name": "@mixos-go/tiktok-shop-sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Generated TypeScript SDK for the TikTok Shop Open Platform API (363 APIs / 25 categories)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
