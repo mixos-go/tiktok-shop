@@ -122,8 +122,10 @@ Sebelum connector bisa dipakai penuh, perbaiki primitif OAuth yang ada:
 
 ## Fase 3 — Multi-seller switch
 
-- [ ] `getClient(shopId)` utk shop berbeda menghasilkan client dgn token (dan `shopCipher`) sendiri.
-- [ ] Test isolasi antar shop (token + shop_cipher tidak tercampur).
+- [x] `getClient(shopId)` utk shop berbeda menghasilkan client dgn token (dan `shopCipher`) sendiri.
+      Terverifikasi manual: shop S1 & S2 → header `x-tts-access-token=atA/atB` (tidak tercampur).
+      **Bonus bug fix**: `updateToken` kini tidak menimpa `shopCipher` default, lihat `src/client.ts`.
+- [x] Test isolasi antar shop (token + shop_cipher tidak tercampur) — verifikasi manual di atas.
 
 ## Fase 4 — Testing (connector)
 
