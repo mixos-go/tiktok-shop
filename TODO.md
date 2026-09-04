@@ -129,13 +129,14 @@ Sebelum connector bisa dipakai penuh, perbaiki primitif OAuth yang ada:
 
 ## Fase 4 — Testing (connector)
 
-- [ ] Unit test `TokenStore` (in-memory get/set/delete).
-- [ ] Unit test `buildAuthUrl` termasuk opsi `serviceIds` (regresi bug) & `category`/`shop_type`
-      override.
-- [ ] Unit test `TikTokConnector` pakai mock (tanpa hit API asli): buildAuthUrl, handleCallback
-      (parse token + expire), refresh, auto-refresh, error path (token habis/belum ada).
-- [ ] Unit test isolasi multi-seller (2 shop).
-- [ ] Smoke test signing tetap hijau (jangan rusak `sign()`).
+- [x] Unit test `TokenStore` (in-memory get/set/delete).
+- [x] Unit test `buildAuthUrl` termasuk opsi `serviceIds` (regresi bug) & `category`/`shop_type`
+      override — `sdk/test/connector.test.cjs` (`npm test`, node:test, 10 test hijau).
+- [x] Unit test `TikTokShopConnector` pakai mock: buildAuthUrl, handleCallback (parse token +
+      expire + `openId`/`shopCipher`), refresh, auto-refresh single-flight, error path.
+- [x] Unit test isolasi multi-seller (2 shop; header `x-tts-access-token` tidak saling timpa).
+- [x] Smoke test signing tetap hijau (test `sign()` deterministik hex 64; connector mocks
+      memakai `sign()`).
 
 ## Fase 5 — Docs & release
 
