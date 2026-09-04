@@ -22,6 +22,7 @@ function toTokenSet(data: NonNullable<TokenResponse['data']>, shopId: string): T
     shopId,
     openId: data.open_id,
     sellerName: data.seller_name,
+    shopCipher: data.shop_cipher,
   }
 }
 
@@ -118,6 +119,7 @@ export class TikTokShopConnector {
       refreshToken: data.refresh_token ?? current.refreshToken,
       openId: data.open_id ?? current.openId,
       sellerName: data.seller_name ?? current.sellerName,
+      shopCipher: data.shop_cipher ?? current.shopCipher,
     }
     await this.store.set(shopId, token)
     this.shopIds.add(shopId)
