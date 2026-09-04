@@ -1,6 +1,6 @@
 # tiktok-shop — TikTok Shop OpenAPI skill
 
-Skill mandiri ala pola `@tts-open-toolkit`/`tts-openapi-*` dari TikTok Shop. Struktur
+Skill mandiri (standalone). Struktur
 identik dengan skill toolkit lain:
 
 ```
