@@ -85,6 +85,11 @@ export interface TikTokClientConfig {
   fetch?: typeof fetch
   /** Throw on non-2xx HTTP response (default false). */
   throwOnHttpError?: boolean
+  /**
+   * Optional hook invoked at the start of every `request()`. The connector uses
+   * this to check token expiry and auto-refresh (single-flight) before a call.
+   */
+  beforeRequest?: () => Promise<void>
 }
 
 /**
@@ -96,20 +101,31 @@ export interface TikTokClientConfig {
  */
 export class TikTokClient {
   private readonly credentials: TikTokCredentials
-  private readonly defaults: { accessToken?: string; shopCipher?: string }
+  private defaults: { accessToken?: string; shopCipher?: string }
   private readonly fetchImpl: typeof fetch
   private readonly throwOnHttpError: boolean
+  private readonly beforeRequest?: () => Promise<void>
 
   constructor(cfg: TikTokClientConfig) {
     this.credentials = cfg.credentials
     this.defaults = { accessToken: cfg.accessToken, shopCipher: cfg.shopCipher }
     this.fetchImpl = cfg.fetch ?? (globalThis as any).fetch
     this.throwOnHttpError = cfg.throwOnHttpError ?? false
+    this.beforeRequest = cfg.beforeRequest
     if (typeof this.fetchImpl !== 'function') {
       throw new Error(
         'Fetch is not available. Use Node 18+ or supply a `fetch` implementation in the client config.',
       )
     }
+  }
+
+  /**
+   * Update the default access_token/shop_cipher at runtime (used by the
+   * connector after an auto-refresh so subsequent calls sign with the fresh
+   * token + send the fresh `x-tts-access-token` header).
+   */
+  updateToken(accessToken?: string, shopCipher?: string): void {
+    this.defaults = { ...this.defaults, accessToken, shopCipher }
   }
 
   /**
@@ -124,6 +140,7 @@ export class TikTokClient {
     params: Record<string, unknown>,
     opts: TikTokRequestOptions = {},
   ): Promise<any> {
+    await this.beforeRequest?.()
     const accessToken = opts.access_token ?? this.defaults.accessToken
     const shopCipher = opts.shop_cipher ?? this.defaults.shopCipher
     const timestamp = toSeconds(opts.timestamp)

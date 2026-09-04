@@ -9,8 +9,40 @@ export interface TikTokAuthUrlOptions {
   state?: string
   /** Authorized shop type: `0` = seller, `1` = authorized user. */
   shopType?: number
-  /** Requested scopes (for cross-border). */
+  /** Requested service/scopes ids (cross-border), joined by `;` in `service_ids`. */
   serviceIds?: string[]
+}
+
+export interface TokenExchangeOptions {
+  baseUrl?: string
+  /** Override `shop_type` (default `0` = seller). */
+  shopType?: number
+  /** Override `category` (default '' — seller biasa). */
+  category?: string
+  /** Custom fetch impl (defaults to globalThis.fetch). */
+  fetch?: typeof fetch
+}
+
+/**
+ * Response token ter-struktur dari endpoint TikTok Shop authorization
+ * (`/authorization/202309/token` & `/token/refresh`). Payload di `data`;
+ * bila `code !== 0` artinya gagal.
+ */
+export interface TokenResponse {
+  code?: number | string
+  message?: string
+  data?: {
+    access_token?: string
+    refresh_token?: string
+    /** Sisa umur access token (detik). */
+    access_token_expire_in?: number
+    /** Sisa umur refresh token (detik). */
+    refresh_token_expire_in?: number
+    open_id?: string
+    seller_name?: string
+    shop_cipher?: unknown
+    [key: string]: unknown
+  }
 }
 
 /**
@@ -34,6 +66,9 @@ export function buildAuthUrl(
     path: redirectUrl,
     shop_type: opts.shopType ?? 0,
   }
+  if (opts.serviceIds !== undefined && opts.serviceIds.length > 0) {
+    query.service_ids = opts.serviceIds.join(';')
+  }
   query.sign = sign(credentials.app_secret, path, query)
   const search = new URLSearchParams()
   for (const [k, v] of Object.entries(query)) search.set(k, String(v))
@@ -47,32 +82,65 @@ export function buildAuthUrl(
 export async function exchangeAuthCode(
   credentials: TikTokCredentials,
   code: string,
-  opts: { baseUrl?: string } = {},
-): Promise<any> {
+  opts: TokenExchangeOptions = {},
+): Promise<TokenResponse> {
   const base = opts.baseUrl ?? DEFAULT_BASE
   const path = '/authorization/202309/token'
   const timestamp = Math.floor(Date.now() / 1000)
   const params: Record<string, unknown> = {
     app_key: credentials.app_key,
     timestamp: String(timestamp),
-    shop_type: 0,
+    shop_type: opts.shopType ?? 0,
     code,
-    category: '',
+    category: opts.category ?? '',
   }
+  return postTokenRequest(base, path, credentials, params, opts.fetch)
+}
+
+/**
+ * Refresh the access token via `grant_type=refresh_token`.
+ * Access token TTS expire ~7 hari — refresh sebelum/ketika menjakati kedaluwarsa.
+ */
+export async function refreshAccessToken(
+  credentials: TikTokCredentials,
+  refreshToken: string,
+  opts: TokenExchangeOptions = {},
+): Promise<TokenResponse> {
+  const base = opts.baseUrl ?? DEFAULT_BASE
+  const path = '/authorization/202309/token/refresh'
+  const timestamp = Math.floor(Date.now() / 1000)
+  const params: Record<string, unknown> = {
+    app_key: credentials.app_key,
+    timestamp: String(timestamp),
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  }
+  return postTokenRequest(base, path, credentials, params, opts.fetch)
+}
+
+async function postTokenRequest(
+  base: string,
+  path: string,
+  credentials: TikTokCredentials,
+  params: Record<string, unknown>,
+  fetchImpl?: typeof fetch,
+): Promise<TokenResponse> {
   const query: Record<string, unknown> = { ...params }
   query.sign = sign(credentials.app_secret, path, query)
   const search = new URLSearchParams()
   for (const [k, v] of Object.entries(query)) search.set(k, String(v))
-  const res = await fetch(`${base}${path}?${search.toString()}`, {
+
+  const fn = fetchImpl ?? (globalThis as any).fetch
+  const res = await fn(`${base}${path}?${search.toString()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })
   const text = await res.text()
-  let json: any
+  let json: TokenResponse | null
   try {
-    json = text ? JSON.parse(text) : null
+    json = text ? (JSON.parse(text) as TokenResponse) : null
   } catch {
-    json = { code: 'invalid_json', message: text }
+    json = { code: 'invalid_json', message: text } as TokenResponse
   }
-  return json
+  return json ?? {}
 }

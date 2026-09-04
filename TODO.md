@@ -102,17 +102,23 @@ Kelas `TikTokConnector` **multi-seller** (satu instance, banyak shop):
 
 Sebelum connector bisa dipakai penuh, perbaiki primitif OAuth yang ada:
 
-- [ ] **Bug `serviceIds`**: di `buildAuthUrl` (`src/auth.ts`), opsi `serviceIds` dideklarasikan tapi
-      tidak pernah ditambahkan ke query. Wire ke query string.
-- [ ] **`category` & `shop_type` hardcoded** di `exchangeAuthCode` (`src/auth.ts:58,60`): jadikan
-      overridable lewat opsi, jangan hardcode (shop_type default `0` = seller).
-- [ ] `exchangeAuthCode` & `refreshAccessToken` harus mengembalikan tipe ter-struktur
-      (`TokenResponse`), bukan `any`.
-- [ ] Riset & putuskan pendekatan injection: `TikTokClient` punya `accessToken`/`shopCipher`
-      readonly di config + per-call `opts.access_token`. Pilih: (a) konstruksi ulang client, atau
-      (b) setter baru, atau (c) getClient dari store tiap call. Dokumentasikan keputusan.
-- [ ] Implement auto-refresh: cek `expiresAt` sebelum call; refresh jika `< threshold`.
-      Single-flight agar refresh tidak dobel saat paralel.
+- [x] **Bug `serviceIds`**: `buildAuthUrl` (`src/auth.ts`) kini menulis `service_ids` ke query,
+      di-join `;` (`[a,b]` → `service_ids=a;b`). Diverifikasi: URL authorize memuat
+      `service_ids=1001%3B1002`.
+- [x] **`category` & `shop_type` hardcoded**: `exchangeAuthCode` & `refreshAccessToken` kini terima
+      opsi `shopType` (default `0`) & `category` (default `''`) lewat `TokenExchangeOptions`;
+      connector meneruskan `shopType`/`category` dari config. Diverifikasi: token call memuat
+      `shop_type` & `category` sesuai override.
+- [x] `exchangeAuthCode` & `refreshAccessToken` kini mengembalikan `TokenResponse` ter-struktur
+      (`code`/`message`/`data{...}`), bukan `any`. Connector memakai helper `unwrap` (`data ?? body`)
+      + `pickExpiresIn` (access_token_expire_in → expires_in → expire_in, dengan narrowing safe).
+- [x] **Keputusan injection (b)**: `TikTokClient` (src/client.ts) ditambah optional hook
+      `beforeRequest` (dipanggil di awal tiap `request`) + `updateToken(accessToken?, shopCipher?)`
+      (field `defaults` diubah mutable). Additif, non-breaking.
+- [x] Implement auto-refresh: `beforeRequest` cek `expiresAt` di store; bila
+      `expiresAt - now < refreshThresholdMs` → `refresh(shopId)` lalu `client.updateToken(...)`.
+      Terverifikasi manual: 3 request paralel saat expiry mendekat → refresh 1x, 3 sukses, store update.
+- [x] Race / single-flight: `Map<shopId, Promise<TokenSet>>` `refreshing` + `.finally()` cleanup.
 
 ## Fase 3 — Multi-seller switch
 

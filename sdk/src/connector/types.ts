@@ -20,10 +20,12 @@ export interface TikTokShopConnectorConfig {
   store?: TokenStore
   /** Override base URL TikTok Shop OpenAPI. Default ke dokumen resmi. */
   baseUrl?: string
-  /** Requested scopes (untuk cross-border). Catatan: belum di-wire di auth.ts (Fase 2). */
+  /** Requested scopes/service ids (cross-border) → query `service_ids` (join ';'). */
   serviceIds?: string[]
   /** Authorized shop type: `0` = seller, `1` = authorized user. */
   shopType?: number
+  /** Kategori token (opsional, default ''). Overridable lewat config. */
+  category?: string
   fetch?: typeof fetch
   /** Sisa waktu (ms) sebelum expiry yang memicu auto-refresh saat getClient. Default 5 mnt. */
   refreshThresholdMs?: number
