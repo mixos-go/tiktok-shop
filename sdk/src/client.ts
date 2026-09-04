@@ -123,9 +123,13 @@ export class TikTokClient {
    * Update the default access_token/shop_cipher at runtime (used by the
    * connector after an auto-refresh so subsequent calls sign with the fresh
    * token + send the fresh `x-tts-access-token` header).
+   * Hanya field yang diberikan yang diganti; field lain tidak tersentuh.
    */
   updateToken(accessToken?: string, shopCipher?: string): void {
-    this.defaults = { ...this.defaults, accessToken, shopCipher }
+    const next = { ...this.defaults }
+    if (accessToken !== undefined) next.accessToken = accessToken
+    if (shopCipher !== undefined) next.shopCipher = shopCipher
+    this.defaults = next
   }
 
   /**
