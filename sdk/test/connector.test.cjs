@@ -13,14 +13,18 @@ function makeFetch(log) {
   return async (url, init) => {
     log.urls.push(String(url))
     log.headers.push(init && init.headers ? init.headers : {})
-    if (String(url).includes('/token/refresh')) {
+    if (String(url).includes('/api/v2/token/refresh')) {
       return { ok: true, status: 200, text: async () =>
         JSON.stringify({ code: 0, data: { access_token: 'at2', refresh_token: 'rt2', access_token_expire_in: 604800 } }) }
     }
-    if (String(url).includes('/token?')) {
-      const isB = String(url).includes('code=codeY')
+    if (String(url).includes('/api/v2/token/get')) {
+      const isB = String(url).includes('auth_code=codeY')
       return { ok: true, status: 200, text: async () =>
         JSON.stringify({ code: 0, data: { access_token: isB ? 'atB' : 'atA', refresh_token: isB ? 'rtB' : 'rtA', access_token_expire_in: 604800, open_id: isB ? 'o2' : 'o1', seller_name: isB ? 'tokongB' : 'tokong', shop_cipher: isB ? 'cipher-B' : 'cipher-A' } }) }
+    }
+    if (String(url).includes('/authorization/202309/shops')) {
+      return { ok: true, status: 200, text: async () =>
+        JSON.stringify({ code: 0, data: { shops: [{ id: 'S1', cipher: 'cipher-via-shops' }] } }) }
     }
     return { ok: true, status: 200, text: async () => JSON.stringify({ code: 0, data: { success: true } }) }
   }
@@ -31,18 +35,72 @@ function mkSpec(path) {
 }
 
 describe('auth buildAuthUrl', () => {
-  it('service_ids join ; dan shop_type/state/path tersedia', () => {
+  it('services host authorize + service_ids join ; + shop_type/state/path, tanpa sign', () => {
     const url = buildAuthUrl(credentials, redirectUri, { state: 'st1', shopType: 0, serviceIds: ['1001', '1002'] })
-    assert.ok(url.includes('/authorization/202309/authorize'), url)
+    assert.ok(url.startsWith('https://services.tiktokshop.com/open/authorize?'), url)
     assert.ok(url.includes('service_ids=1001%3B1002'), url)
     assert.ok(url.includes('shop_type=0'), url)
     assert.ok(url.includes('state=st1'), url)
     assert.ok(url.includes('path='), url)
-    assert.ok(url.includes('sign='), url)
+    assert.ok(!url.includes('sign='), 'authorize tidak di-sign (host authorize berbeda dari business API)')
   })
   it('tanpa serviceIds → tidak ada param service_ids', () => {
     const url = buildAuthUrl(credentials, redirectUri)
     assert.ok(!url.includes('service_ids'), url)
+  })
+})
+
+describe('token endpoint v2 (auth.tiktok-shops.com)', () => {
+  it('exchange memakai app_secret + auth_code + grant_type=authorized_code, metode GET', async () => {
+    const log = { urls: [], headers: [] }
+    const { exchangeAuthCode } = require('../dist/auth')
+    await exchangeAuthCode(credentials, 'codeZ', { fetch: makeFetch(log) })
+    const url = log.urls[0]
+    assert.ok(url.startsWith('https://auth.tiktok-shops.com/api/v2/token/get?'), url)
+    assert.ok(url.includes('app_key=appKeyX'), url)
+    assert.ok(url.includes('app_secret=secret'), url)
+    assert.ok(url.includes('auth_code=codeZ'), url)
+    assert.ok(url.includes('grant_type=authorized_code'), url)
+    assert.ok(!url.includes('sign='), url)
+  })
+
+  it('refresh memakai app_secret + refresh_token + grant_type=refresh_token', async () => {
+    const log = { urls: [], headers: [] }
+    const { refreshAccessToken } = require('../dist/auth')
+    await refreshAccessToken(credentials, 'rtZ', { fetch: makeFetch(log) })
+    const url = log.urls[0]
+    assert.ok(url.startsWith('https://auth.tiktok-shops.com/api/v2/token/refresh?'), url)
+    assert.ok(url.includes('app_secret=secret'), url)
+    assert.ok(url.includes('refresh_token=rtZ'), url)
+    assert.ok(url.includes('grant_type=refresh_token'), url)
+  })
+
+  it('access_token_expire_in epoch absolut (v2) → expiresAt = epoch ms', async () => {
+    const log = { urls: [], headers: [] }
+    const fetchAbs = async (url) => {
+      log.urls.push(String(url))
+      return { ok: true, status: 200, text: async () =>
+        JSON.stringify({ code: 0, data: { access_token: 'atAbs', refresh_token: 'rtAbs', access_token_expire_in: 1798764736 } }) }
+    }
+    const c = createTikTokShopConnector({ credentials, redirectUri, fetch: fetchAbs })
+    const token = await c.handleCallback('S1', 'codeAbs')
+    assert.equal(token.accessToken, 'atAbs')
+    assert.equal(token.expiresAt, 1798764736 * 1000)
+  })
+
+  it('handleCallback tanpa shop_cipher di token → resolve via Get Authorized Shops', async () => {
+    const fetchNoCipher = async (url) => {
+      if (String(url).includes('/api/v2/token/get'))
+        return { ok: true, status: 200, text: async () =>
+          JSON.stringify({ code: 0, data: { access_token: 'atX', refresh_token: 'rtX', access_token_expire_in: 604800 } }) }
+      if (String(url).includes('/authorization/202309/shops'))
+        return { ok: true, status: 200, text: async () =>
+          JSON.stringify({ code: 0, data: { shops: [{ id: 'S1', cipher: 'cipher-via-shops' }] } }) }
+      return { ok: true, status: 200, text: async () => JSON.stringify({ code: 0, data: {} }) }
+    }
+    const c = createTikTokShopConnector({ credentials, redirectUri, fetch: fetchNoCipher })
+    const token = await c.handleCallback('S1', 'codeX')
+    assert.equal(token.shopCipher, 'cipher-via-shops')
   })
 })
 
@@ -60,7 +118,7 @@ describe('TikTokShopConnector', () => {
   it('buildAuthUrl: shop_id & state disisipkan ke query redirect', () => {
     const c = createTikTokShopConnector({ credentials, redirectUri, fetch: makeFetch({ urls: [], headers: [] }) })
     const url = c.buildAuthUrl('S1', 'st1')
-    assert.ok(url.includes('/authorization/202309/authorize'), url)
+    assert.ok(url.startsWith('https://services.tiktokshop.com/open/authorize?'), url)
     assert.ok(url.includes('shop_id%3DS1'), url)
     assert.ok(url.includes('state=st1'), url)
   })
@@ -100,7 +158,7 @@ describe('TikTokShopConnector', () => {
       client.request(mkSpec('/product/202309/products'), {}),
       client.request(mkSpec('/product/202309/products'), {}),
     ])
-    const refreshes = log.urls.filter((u) => u.includes('/token/refresh')).length
+    const refreshes = log.urls.filter((u) => u.includes('/api/v2/token/refresh')).length
     const calls = log.urls.filter((u) => u.includes('/product/202309/products')).length
     assert.equal(refreshes, 1)
     assert.equal(calls, 3)

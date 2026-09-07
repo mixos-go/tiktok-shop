@@ -43,6 +43,19 @@ await tiktok.order.addExternalOrderReferences(
 
 ## Otorisasi (access_token)
 
+Alur OAuth TikTok Shop 2024+:
+- **Authorize** di host terpisah: `https://services.tiktokshop.com/open/authorize` (ROW) /
+  `https://services.us.tiktokshop.com/open/authorize` (US). URL authorize TIDAK di-sign.
+- **Token**: `GET https://auth.tiktok-shops.com/api/v2/token/get` dengan
+  `app_key` + `app_secret` + `auth_code` + `grant_type=authorized_code`
+  (tanpa signature; `grant_type` sengaja `authorized_code`, bukan `authorization_code`).
+- **Refresh**: `GET https://auth.tiktok-shops.com/api/v2/token/refresh` dengan
+  `app_key` + `app_secret` + `refresh_token` + `grant_type=refresh_token`.
+  `access_token_expire_in` di v2 berupa unix timestamp ABSOLUT (detik).
+- **Business API**: `https://open-api.tiktokglobalshop.com` — di-SIGN (app_key/timestamp/sign
+  di query, access token di header `x-tts-access-token`). Signature dihitung atas FINAL path
+  (path param tersubstitusi), bukan template `{product_id}`.
+
 ```ts
 import { TikTokShop, buildAuthUrl, exchangeAuthCode } from './index'
 
@@ -57,6 +70,7 @@ const token = await exchangeAuthCode(
   'CODE_FROM_CALLBACK',
 )
 // token.data.access_token -> masukkan ke TikTokShop(accessToken)
+// token.data.access_token_expire_in = epoch absolut (jangan di-add ke Date.now())
 ```
 
 ## Connector multi-seller (OAuth + auto-refresh)
@@ -64,7 +78,9 @@ const token = await exchangeAuthCode(
 Untuk aplikasi multi-shop, pakai `TikTokShopConnector` (`src/connector/`). Satu
 instance, token disimpan per `shopId` di `TokenStore`. Access token dikirim via
 header `x-tts-access-token`; `refresh_token` single-use — connector selalu
-menyimpan yang terbaru (refresh token TTS expire ~7 hari):
+menyimpan yang terbaru (refresh token TTS expire ~7 hari). Bila token v2 tidak
+membawa `shop_cipher`, `handleCallback` melengkapinya via Get Authorized Shops
+(atau pakai config `shopCipher` preseed):
 
 ```ts
 import { createTikTokShopConnector, InMemoryTokenStore } from './connector'
@@ -74,7 +90,7 @@ const connector = createTikTokShopConnector({
   redirectUri: 'https://yourapp/callback',
   shopType: 0,                 // 0 = seller (default)
   serviceIds: ['1003', ...],   // (opsional, cross-border) → query service_ids, join ';'
-  category: 'cross_border',    // (opsional) dikirim saat token exchange
+  shopCipher: 'ROW_xxx',       // (opsional) preseed bila sudah tahu cipher shop
   store: new InMemoryTokenStore(), // ganti dgn persisten store utk production
 })
 

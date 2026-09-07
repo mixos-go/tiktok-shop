@@ -121,7 +121,12 @@ async function main() {
     await client.affiliateCreator.getShoppableVideoStatus({ video_id: 'VID123' })
     const u = new URL(captured.url)
     assert.strictEqual(u.pathname, '/affiliate_creator/202509/videos/VID123/status')
-    console.log('✓ Path param: {video_id} substituted into URL')
+    // Sign atas FINAL path (tersubstitusi), bukan template {video_id}.
+    const qp = Object.fromEntries(u.searchParams)
+    delete qp.sign
+    const expectSign = sign('secret', '/affiliate_creator/202509/videos/VID123/status', qp)
+    assert.strictEqual(u.searchParams.get('sign'), expectSign)
+    console.log('✓ Path param: {video_id} substituted into URL + signature over final path')
   }
 
   // 5. API error (non-zero code) surfaces as TikTokError.

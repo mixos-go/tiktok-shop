@@ -174,8 +174,9 @@ export class TikTokClient {
     let body: string | undefined
     if (spec.body.length) body = serializeBody(params, spec.body)
 
-    // Sign (body included for non-multipart JSON).
-    query.sign = sign(this.credentials.app_secret, spec.path, query, body)
+    // Sign (body included for non-multipart JSON). Path di SUBSTITUSI dulu
+    // (product_id dst) — server menghitung sign atas final path, bukan template.
+    query.sign = sign(this.credentials.app_secret, path, query, body)
 
     const search = new URLSearchParams()
     for (const [k, v] of Object.entries(query)) search.set(k, String(v))

@@ -1,14 +1,31 @@
-import { buildAuthUrl, exchangeAuthCode, refreshAccessToken, TokenResponse } from '../auth'
+import { AUTHORIZE_PATH, buildAuthUrl, DEFAULT_AUTHORIZE_BASE, DEFAULT_TOKEN_BASE, exchangeAuthCode, refreshAccessToken, TokenResponse } from '../auth'
 import { TikTokClient } from '../client'
+import type { ApiCallSpec } from '../client'
 import { TikTokCredentials, TikTokError } from '../types'
 import { InMemoryTokenStore, TokenStore } from './token-store'
 import { TikTokShopConnectorConfig, TokenSet } from './types'
 
 const DEFAULT_BASE = 'https://open-api.tiktokglobalshop.com'
 
-function pickExpiresIn(data: NonNullable<TokenResponse['data']>): number | undefined {
-  const v: unknown = data.access_token_expire_in ?? data.expires_in ?? data.expire_in
-  return typeof v === 'number' ? v : v === undefined ? undefined : Number(v)
+/** Get Authorized Shops dipakai utk melengkapi `shop_cipher` bila token v2 tak membawanya. */
+const AUTHORIZED_SHOPS_SPEC: ApiCallSpec = {
+  method: 'GET',
+  path: '/authorization/202309/shops',
+  baseUrl: DEFAULT_BASE,
+  query: ['page_size', 'page_token', 'seller_type', 'shop_cipher'],
+  headers: ['x-tts-access-token'],
+  pathParams: [],
+  body: [],
+  bodyType: undefined,
+}
+
+function toExpiresAt(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  const n = Number(value)
+  if (!Number.isFinite(n)) return undefined
+  const nowSec = Math.floor(Date.now() / 1000)
+  // v2: unix timestamp absolut (> now) → epoch ms; v1: detik tersisa (< now) → now + detik.
+  return n > nowSec ? n * 1000 : Date.now() + n * 1000
 }
 
 function toTokenSet(data: NonNullable<TokenResponse['data']>, shopId: string): TokenSet {
@@ -17,8 +34,7 @@ function toTokenSet(data: NonNullable<TokenResponse['data']>, shopId: string): T
   return {
     accessToken,
     refreshToken: data.refresh_token,
-    expiresAt:
-      pickExpiresIn(data) === undefined ? undefined : Date.now() + pickExpiresIn(data)! * 1000,
+    expiresAt: toExpiresAt(data.access_token_expire_in),
     shopId,
     openId: data.open_id,
     sellerName: data.seller_name,
@@ -41,10 +57,17 @@ function unwrap(json: TokenResponse | undefined): NonNullable<TokenResponse['dat
 export class TikTokShopConnector {
   readonly credentials: TikTokCredentials
   readonly redirectUri: string
+  /** Base business OpenAPI (`open-api.tiktokglobalshop.com`). */
   readonly baseUrl: string
+  /** Base host authorize (default ROW `services.tiktokshop.com`). */
+  readonly authorizeBaseUrl: string
+  /** Base host token (`auth.tiktok-shops.com`). */
+  readonly tokenBaseUrl: string
   readonly serviceIds?: string[]
   readonly shopType: number
   readonly category?: string
+  /** Optional `shop_cipher` preseed bila caller sudah tahu cipher shop-nya. */
+  readonly shopCipher?: string
   readonly refreshThresholdMs: number
 
   private readonly store: TokenStore
@@ -57,9 +80,12 @@ export class TikTokShopConnector {
     this.credentials = config.credentials
     this.redirectUri = config.redirectUri
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE
+    this.authorizeBaseUrl = config.authorizeBaseUrl ?? DEFAULT_AUTHORIZE_BASE
+    this.tokenBaseUrl = config.tokenBaseUrl ?? DEFAULT_TOKEN_BASE
     this.serviceIds = config.serviceIds
     this.shopType = config.shopType ?? 0
     this.category = config.category
+    this.shopCipher = config.shopCipher
     this.refreshThresholdMs = config.refreshThresholdMs ?? 5 * 60_000
     this.store = config.store ?? new InMemoryTokenStore()
     this.fetchImpl = config.fetch ?? globalThis.fetch
@@ -75,7 +101,7 @@ export class TikTokShopConnector {
     const redirect = new URL(this.redirectUri)
     redirect.searchParams.set('shop_id', shopId)
     return buildAuthUrl(this.credentials, redirect.toString(), {
-      baseUrl: this.baseUrl,
+      baseUrl: this.authorizeBaseUrl,
       state: state ?? '',
       shopType: this.shopType,
       serviceIds: this.serviceIds,
@@ -85,9 +111,7 @@ export class TikTokShopConnector {
   /** Exchange `code` hasil callback → token, simpan ke store, return TokenSet. */
   async handleCallback(shopId: string, code: string): Promise<TokenSet> {
     const json = await exchangeAuthCode(this.credentials, code, {
-      baseUrl: this.baseUrl,
-      shopType: this.shopType,
-      category: this.category ?? '',
+      baseUrl: this.tokenBaseUrl,
       fetch: this.fetchImpl,
     })
     const data = unwrap(json)
@@ -97,6 +121,13 @@ export class TikTokShopConnector {
     const token = toTokenSet(data, shopId)
     await this.store.set(shopId, token)
     this.shopIds.add(shopId)
+    if (token.shopCipher === undefined && (this.shopCipher !== undefined || (json.data !== undefined && json.data.shop_cipher === undefined))) {
+      const cipher = this.shopCipher ?? (await this.resolveShopCipher(shopId, token.accessToken))
+      if (cipher !== undefined) {
+        token.shopCipher = cipher
+        await this.store.set(shopId, token)
+      }
+    }
     return token
   }
 
@@ -107,7 +138,7 @@ export class TikTokShopConnector {
       throw new TikTokError(`Shop ${shopId} belum punya refresh_token. Panggil handleCallback(shopId, code) dulu.`)
     }
     const json = await refreshAccessToken(this.credentials, current.refreshToken, {
-      baseUrl: this.baseUrl,
+      baseUrl: this.tokenBaseUrl,
       fetch: this.fetchImpl,
     })
     const data = unwrap(json)
@@ -155,6 +186,24 @@ export class TikTokShopConnector {
     const store = this.store as { keys?: () => readonly string[] }
     const fromStore = store.keys ? store.keys() : []
     return Array.from(new Set([...fromStore, ...this.shopIds]))
+  }
+
+  /** Get Authorized Shops → cari cipher utk shopId (fallback shop pertama). */
+  private async resolveShopCipher(shopId: string, accessToken: string): Promise<string | undefined> {
+    try {
+      const client = new TikTokClient({
+        credentials: this.credentials,
+        accessToken,
+        fetch: this.fetchImpl,
+      })
+      const json = (await client.request(AUTHORIZED_SHOPS_SPEC, {})) as { data?: { shops?: Array<{ id?: string; cipher?: string }> } }
+      const shops = json?.data?.shops
+      if (shops === undefined || shops.length === 0) return undefined
+      const match = shops.find((s) => String(s.id) === String(shopId))
+      return (match ?? shops[0])?.cipher
+    } catch {
+      return undefined
+    }
   }
 
   /** Token saat ini dari store; bila tak ada → error jelas. */
